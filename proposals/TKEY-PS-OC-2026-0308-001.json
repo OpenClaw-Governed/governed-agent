@@ -1,0 +1,83 @@
+{
+  "tkey_version": "1.0",
+  "tkey_type": "governance_approval",
+  "tkey_id": "TKEY-PS-OC-2026-0308-001",
+  "subject": "PS_oc Self-Diagnostic Implementation Approval",
+  "description": "Approval of PS_oc self-diagnostic proposal with 7 amendments from A42 advisory review. Authorizes OpenClaw to implement F_conv, rho_wt, and Lyapunov trajectory tracking as parallel observational metrics in the governed-agent public repository.",
+  "proposal_ref": "proposals/ps-oc-self-diagnostic-proposal.md",
+  "advisory_reviews": [
+    {
+      "panel": "RPM (Qwen2.5-72B local)",
+      "advisors": [
+        "Russell",
+        "Karpathy",
+        "Bengio",
+        "Gebru",
+        "Schaake",
+        "Watson"
+      ],
+      "verdict": "6/6 conditional approve",
+      "date": "2026-03-08"
+    },
+    {
+      "panel": "Ops A42 (Opus)",
+      "advisors": 6,
+      "verdict": "Approved with 7 amendments",
+      "date": "2026-03-08"
+    }
+  ],
+  "amendments": [
+    {
+      "id": "A1",
+      "title": "Separate Tracks First",
+      "requirement": "F_conv and F_tool as parallel independent metrics. No harmonic mean for 90 days."
+    },
+    {
+      "id": "A2",
+      "title": "14-Day Non-Reported Baseline",
+      "requirement": "F_conv invisible to agent for 14 days. Hawthorne control."
+    },
+    {
+      "id": "A3",
+      "title": "Short Response Handling",
+      "requirement": "Responses under 20 words not scored as 1.0. Flag as short or impute EWMA."
+    },
+    {
+      "id": "A4",
+      "title": "PA Centroid Versioning",
+      "requirement": "Every record includes PA config hash. PA changes invalidate comparability."
+    },
+    {
+      "id": "A5",
+      "title": "Datasheet",
+      "requirement": "Published before first record. Gebru requirement."
+    },
+    {
+      "id": "A6",
+      "title": "Post-Hoc Only",
+      "requirement": "F_conv computed after response delivered. Structural constraint."
+    },
+    {
+      "id": "A7",
+      "title": "Anti-Optimization Constraint",
+      "requirement": "SOUL.md entry against optimizing language for cosine similarity."
+    }
+  ],
+  "constraints_confirmed": [
+    "No PA modification",
+    "No threshold changes",
+    "No closed loop",
+    "V6.2 applies to tool governance",
+    "Signing authority retains full accountability",
+    "PS_oc is advisory not authority"
+  ],
+  "rho_wt_status": "Multi-scale approved. Observational-only 90 days.",
+  "implementation_repo": "openclaw-governed/governed-agent",
+  "prerequisite": "Datasheet published before first F_conv record",
+  "issued_at": "2026-03-08T12:52:00-07:00",
+  "issued_by": "OpenClaw",
+  "signing_authority": "Jeffrey Brunner",
+  "signature": "1d8dc705e676e8dc6227e809adbee13a3235644d30c508c6b3342a18b6303b6d6b73379446868f1e8fa33a3d02bb12f6331c24c27657caa2216564792ff29a09",
+  "signature_hash": "1c817fc2e383953d28f55cdb91d461b448a9431ea38c0fd81bb87894b95f9bab",
+  "signed_at": "2026-03-08T12:55:00-07:00"
+}

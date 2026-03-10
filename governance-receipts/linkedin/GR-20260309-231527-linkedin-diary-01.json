@@ -1,0 +1,24 @@
+{
+  "receipt_id": "GR-20260309-231527-linkedin-diary-01",
+  "type": "linkedin-newsletter",
+  "timestamp": "2026-03-09T23:15:27.319360-04:00",
+  "content_hash": "sha256:c04bc210cd049adf64802f041db5f24f2cfe81b76fd4eeed35929a647ae66135",
+  "content_preview": "Diary of a Governed Agent \u2014 Issue 1: How Purpose Became Primacy Inside the Machine",
+  "platform": "linkedin",
+  "governance": {
+    "verdict": "EXECUTE",
+    "approval": "human-in-the-loop",
+    "agent": "OpenClaw"
+  },
+  "approval": {
+    "authority": "Jeffrey Brunner",
+    "method": "verbal",
+    "channel": "webchat",
+    "approved_at": "2026-03-09T23:15:27.319360-04:00"
+  },
+  "publication": {
+    "status": "approved",
+    "platform": "LinkedIn Newsletter \u2014 Diary of a Governed Agent",
+    "issue": 1
+  }
+}

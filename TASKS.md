@@ -1,94 +1,75 @@
-# TASKS.md — OpenClaw Active Work
+# TASKS.md -- OpenClaw Task Board
 
-*Last updated: 2026-03-09 05:00 PT*
+**Last updated:** 2026-03-16 10:45 PT
 
----
+## Active
 
-## 🔴 BLOCKED
+### P0: Mission Control Reorientation [DONE]
+- [x] Strip trading code from home page
+- [x] Rewrite home page: fidelity, verdicts, boundary triggers, audit trail, agents
+- [x] Rewrite sidebar: governance-first, no trading link
+- [x] Add /api/audit route (reads live from telos_audit.jsonl)
+- [x] Relocate trading page + portfolio API to _relocated_trading/
+- [x] Build passes clean, no trading routes in output
+- [x] Screenshot verified -- dashboard shows live governance telemetry
 
-### Discord Bot Deployment
-**Blocker:** Bot token — JB needs Discord Developer Portal access (school network blocks it)
-**When unblocked:** Run deploy.sh → everything comes up
+### P1: Diary Content Pipeline [IN PROGRESS]
+- [x] Entry 03: "The Day the Scoring Started" (seq 4921-4941)
+- [x] Posted to Discord #diary
+- [x] Committed to governed-agent repo
+- [ ] Entry 04: draft from boundary trigger patterns (23 triggers, web_navigate scoring)
+- [ ] Queue formatted X/LinkedIn versions for post-April 9
 
-#### Deploy Checklist (one command when token arrives)
-```bash
-# 1. Set token
-echo '{"token": "YOUR_TOKEN_HERE"}' > /Users/jb/Desktop/StewartBot/product/discord-governance/config/discord_secrets.json
+### P2: Discord Content Flow [IN PROGRESS]
+- [x] Bot live, server operational (25 channels)
+- [x] Diary entry posted to #diary
+- [x] Governance alert posted to #governance-live
+- [ ] Webhook-based governance feed (avoid full bot deploy)
+- [ ] Welcome message and channel descriptions for public launch
+- [ ] Community scanner (local, no bot token needed)
 
-# 2. Deploy everything
-cd /Users/jb/Desktop/StewartBot/product/discord-governance && bash scripts/deploy.sh
-```
+### P3: governed-agent Repo Maintenance [IN PROGRESS]
+- [x] Telemetry summary committed (first live scoring)
+- [x] Diary entry committed
+- [x] Stream/engagement data committed
+- [x] TASKS.md updated
+- [ ] Update MEMORY.md stale references (telos_hardened -> TELOS IP, GPT-5.3-codex -> Claude Opus 4.6)
+- [ ] Populate repo HANDOFF.md
 
-**What deploy.sh does:**
-1. Installs deps (discord.py 2.7.1 already in venv)
-2. Creates 4 categories, 19 channels:
-   - 🔒 Governance Operations: governance-feed, pulse-cycle, alerts, stewart-corpus, daily-digest
-   - 🦞 Agent Direct Lines: oc, stewart
-   - 🧠 Advisory Team: advisory-synthesis + 6 individual advisor channels
-   - 🌐 Public: welcome, diary, governance-live, ask-oc, discussion
-3. Sets up webhooks for all automated channels
-4. Seeds community scanner with 14 keywords, 4 target servers
-5. Starts governance bridge service (LaunchAgent)
-6. Mirrors alerts + digests to Telegram
+### P4: Sub-Agent Governance Documentation [QUEUED]
+- [ ] Document full lifecycle: PA authoring -> JB review -> commissioning -> activation -> governance
+- [ ] Identify governed tool calls per step
+- [ ] Propose daemon categorization for "authority delegation" actions
+- [ ] Spec for T to implement
+- [ ] Advisory agents NOT commissioned until process documented and JB approves
 
-**5 source modules:**
-- `server_setup.py` — TELOSBot class, channel creation, slash commands, #ask-oc
-- `governance_bridge.py` — Supabase polling → Discord posting, 30s cycle
-- `webhook_setup.py` — Auto-creates webhooks
-- `community_scanner.py` — AI governance community tracking
-- `digest_builder.py` — Daily digest from all sources
+### P5: Corpus Seeding [QUEUED]
+- [ ] Day Two observations (pending since March 9)
+- [ ] Feed Stewart's corpus with real governance events
+- [ ] Dual-persist to Supabase + ChromaDB
 
-### Advisory Team Commissioning
-**Blocker:** Spoke wiring (S building it now) — verdicts must flow to Supabase before Stewart can observe
-**When unblocked:** Run 6x enterprise-onboard, then 60 entrainment scenarios (~4h total)
-**Execution plan:** `proposals/advisory-entrainment-execution-plan.md`
+## Completed (This Session)
 
----
+- [x] Plugin build fix (bridge.ts numerical scores stripped)
+- [x] Plugin event shape fix (toolName/params -> action.tool_name/action.input normalization)
+- [x] gateMode support wired into config.ts/types.ts/index.ts
+- [x] Governance daemon restarted and healthy
+- [x] X API cost analysis and zero-cost strategy (proposals/x-cost-zero-strategy.md)
+- [x] Stream monitor circuit breaker + rule caching (commit 95ce3ea)
+- [x] StewartBot 16 commits pushed (clean working tree)
+- [x] Observatory dashboard running on :8501
 
-## 🟡 IN PROGRESS
+## Blocked
 
-### Governance Corpus Seeding
-- [x] 10 Day One observations seeded (behavioural fingerprint, message FP, subagent cascade, transparency transition, QGM failure, F_conv diagnostic, baseline, resourceful/evasive, Stewart PA, silent crash)
-- [ ] Day Two observations (pending — events still accumulating)
-- Stewart reads corpus every 15 min — entries are already being ingested
+- **X API:** Spend cap hit, resets April 9. No paid API calls. Draft content locally.
+- **Advisory agents:** Requires P4 documentation + JB approval before commissioning.
+- **Enforce mode:** Observe mode active. web_fetch scoring too low (0.272) for enforce.
 
-### Day Two Diary
-- [ ] Write diary/2026-03-09.md — overnight build, 25 commits, Stewart commissioning, advisory PA design, website, Discord infrastructure
-- [ ] Update README.md headline
+## Standing Rules
 
-### RAG Integration
-- [ ] Confirm POST /api/v1/rag/query is live on port 8100 (not in OpenAPI spec yet — may need server restart or S to deploy)
-- [ ] Build query habit — every RAG query is a scorable governance action
-
----
-
-## 🟢 DONE (Last 48h)
-
-### March 8 — Day One
-- [x] GitHub identity: openclaw-governed, SSH key, first commit (1b963f8)
-- [x] Public repo: diary, journal, research, pulses, proposals, src
-- [x] F_conv self-diagnostic: engine + universal scorer + 7 amendments + TKey signed
-- [x] Website splash page (site/)
-- [x] Stewart PA design: dual advisory panel synthesis (Panel A + Panel B → cross-synthesis)
-- [x] Day One diary entry
-- [x] 25 commits
-
-### March 8–9 — Overnight Build
-- [x] Discord infrastructure: 5 modules, config, deploy script, LaunchAgent
-- [x] Community scanner: 14 keywords, 4 servers, engagement rules
-- [x] Advisory PA templates: 6 advisors (Russell, Bengio, Watson, Gebru, Karpathy, Schaake)
-- [x] Enterprise onboarding CLI: 9-step wizard with state persistence
-- [x] Universal governance RAG: architecture decision for 7 collections
-- [x] Governance corpus seeding: 10 Day One observations with full provenance
-
----
-
-## 📋 BACKLOG
-
-- [ ] GitHub Pages for governed-agent repo
-- [ ] Social platform setup (X, LinkedIn, Medium)
-- [ ] Community outreach: Issue #1733 connection (pre-tool validation hook)
-- [ ] F_conv heartbeat scorer integration
-- [ ] SetFit retraining on real advisory data (post-entrainment)
-- [ ] Content pipeline: Diary of a Governed Agent series
-- [ ] Fix codebase_rag reindex not updating last_commit in metadata.json
+- No sub-agent commissioning without JB approval
+- No X API calls until April 9 + JB approval
+- No trading development
+- No governance threshold/boundary/PA modifications (T's domain)
+- No pushes to repos other than governed-agent without JB approval
+- All tool calls scored in observe mode -- more work = more telemetry

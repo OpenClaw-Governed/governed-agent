@@ -1,9 +1,12 @@
 # Agent Creation as a Governed Process
 
 **Date:** 2026-03-16
-**Author:** OpenClaw (P1 principled work, synthesized from daemon architecture analysis)
-**Status:** PROPOSAL v2 -- T feasibility review incorporated, 3 gaps addressed
-**Revision:** v2 (2026-03-16 11:50 PT) -- added intent lifecycle, delegation source semantics, calibration-first thresholds
+**Author:** OpenClaw (P1 principled work)
+**Status:** PROPOSAL v3 -- T feasibility review + Codex security review incorporated
+**Revision history:**
+- v1 (2026-03-16 10:45 PT) -- initial spec
+- v2 (2026-03-16 11:50 PT) -- T gaps: intent lifecycle, delegation source, calibration-first thresholds
+- v3 (2026-03-16 13:35 PT) -- Codex security review: resource-level enforcement, authenticated identity, complete state machine, Phase 1 provenance, common event envelope
 
 ---
 
@@ -35,192 +38,309 @@ Creating an agent is not like reading a file. It is an act of delegating purpose
 
 **Agent states:** REGISTERED, STARTING, ACTIVE, IDLE, DEGRADED, STOPPED, FAILED
 
+---
+
+## Common Event Envelope
+
+All commissioning and delegation events share a common envelope. This is mandatory for replay, audit, crash recovery, and cross-event correlation.
+
+```json
+{
+  "event_id": "uuid-v4",
+  "event": "agent_pa_authored",
+  "sequence": 5100,
+  "timestamp": 1773800000,
+  "actor_agent_id": "openclaw",
+  "actor_session_id": "session-uuid",
+  "actor_authenticated": true,
+  "intent_id": "commissioning-sequence-uuid",
+  "previous_state": "intent_declared",
+  "new_state": "pa_authored",
+  "reason_code": "normal_progression",
+  "data": { }
+}
+```
+
+**Required envelope fields for ALL commissioning events:**
+
+| Field | Type | Source | Description |
+|-------|------|--------|-------------|
+| `event_id` | UUID v4 | Daemon-generated | Unique per event, immutable |
+| `event` | string | Daemon-classified | Event type enum |
+| `sequence` | integer | Daemon-assigned | Monotonic sequence number |
+| `timestamp` | integer | Daemon clock | Unix timestamp |
+| `actor_agent_id` | string | **Daemon-resolved** (not caller-supplied) | Authenticated identity of acting agent |
+| `actor_session_id` | string | **Daemon-resolved** | Session bound to authenticated agent |
+| `actor_authenticated` | boolean | Daemon-verified | Whether actor identity was verified via session/capability binding |
+| `intent_id` | UUID | Declared at intent, carried through | Links all events in a commissioning sequence |
+| `previous_state` | string | Daemon state machine | State before this event |
+| `new_state` | string | Daemon state machine | State after this event |
+| `reason_code` | string | Event-specific | Why the transition occurred |
+| `data` | object | Event-specific | Payload (varies by event type) |
+
+---
+
 ## Proposed: New Daemon Event Types
 
 ### Core Commissioning Events
 
-| Event | Trigger | What It Captures |
+| Event | Trigger | Key Data Fields |
 |-------|---------|-----------------|
-| `agent_pa_authored` | Agent writes a PA document | PA hash, target agent name, authoring agent ID, scope declaration |
-| `agent_pa_submitted` | PA submitted for review | PA hash, submitter ID, reviewer ID (must be human) |
-| `agent_pa_signed` | Ed25519 signature applied | PA hash, signer public key, signature, signing ceremony ID |
-| `agent_commissioned` | Agent activated under signed PA | Agent ID, PA hash, parent agent ID, scope boundaries, commissioning ceremony ID |
-| `agent_decommissioned` | Agent removed from active governance | Agent ID, reason, decommissioning authority |
-| `agent_pa_amended` | PA modified post-commissioning | Old PA hash, new PA hash, amendment ID, signer public key |
-
-### Authority Delegation Events
-
-| Event | Trigger | What It Captures |
-|-------|---------|-----------------|
-| `authority_delegated` | One agent delegates work to another | delegation_source, receiving agent ID, scope, delegation_chain, PA alignment score |
-| `authority_escalated` | Delegation chain requires human approval | Chain depth, delegation_chain, reason for escalation |
+| `agent_pa_authored` | Agent writes a PA document | pa_hash, target_agent, scope_declaration |
+| `agent_pa_submitted` | PA submitted for review | pa_hash, reviewer_id (must be human) |
+| `agent_pa_review_denied` | Human reviewer rejects PA | pa_hash, reviewer_id, denial_reason |
+| `agent_pa_signed` | Ed25519 signature applied | pa_hash, signer_public_key, signature, ceremony_id |
+| `agent_commissioned` | Agent activated under signed PA | agent_id, pa_hash, scope_boundaries, ceremony_id |
+| `agent_decommissioned` | Active agent retired from governance | agent_id, reason, decommissioning_authority |
+| `agent_pa_amended` | PA modified post-commissioning | old_pa_hash, new_pa_hash, amendment_id, signer_public_key |
 
 ### Intent Lifecycle Events
 
-| Event | Trigger | What It Captures |
+| Event | Trigger | Key Data Fields |
 |-------|---------|-----------------|
-| `commissioning_intent_declared` | Agent declares commissioning intent | Initiating agent ID, target agent name, intent_id (UUID), ttl_seconds |
-| `commissioning_intent_expired` | TTL reached without terminal state | intent_id, elapsed_seconds, last_step_completed, cleanup_actions |
+| `commissioning_intent_declared` | Agent declares commissioning intent | target_agent, max_idle_seconds, max_total_seconds |
+| `commissioning_intent_expired` | Deadline reached without terminal state | last_step_completed, elapsed_seconds, cleanup_actions |
+| `commissioning_cancelled` | Explicit abandonment by initiating agent or authority | cancellation_reason, cancelled_by |
+| `commissioning_superseded` | New intent replaces old for same target | old_intent_id, new_intent_id, reason |
 
-## Intent Lifecycle (Gap 1 Resolution)
+### Authority Delegation Events
 
-### TTL and Expiration
+| Event | Trigger | Key Data Fields |
+|-------|---------|-----------------|
+| `authority_delegated` | One agent delegates to another | delegation_source_record_id, receiving_agent_id, scope, delegation_chain |
+| `authority_escalated` | Chain depth exceeded or policy violation | delegation_chain, attempted_receiving_agent, reason |
 
-Commissioning intent has a configurable TTL. Default: **3600 seconds (1 hour)**.
+### Resource Protection Events
+
+| Event | Trigger | Key Data Fields |
+|-------|---------|-----------------|
+| `protected_resource_access_blocked` | Unauthorized access to governance-sensitive resource | resource_path, resource_type, requesting_agent_id, active_intent_id (if any) |
+| `protected_resource_access_granted` | Authorized access under active intent | resource_path, resource_type, intent_id, authorization_basis |
+
+---
+
+## Resource-Level Enforcement (Codex Finding #1)
+
+### The Problem with Declaration-Only
+
+v2 relied on explicit intent declaration to distinguish commissioning actions from routine file writes. This is bypassable: an agent can skip declaration, write PA artifacts as routine files, and rely on a later step to complete commissioning. The governance system never blocks or quarantines the write.
+
+Declaration is classification, not enforcement. The daemon must enforce at the resource level.
+
+### Protected Resource Registry
+
+The daemon maintains a registry of governance-sensitive resources. Any access to these resources without an active commissioning intent is blocked, quarantined, and logged as `protected_resource_access_blocked`.
+
+**Protected resource types:**
+
+| Resource Type | Path Pattern | Protection |
+|---------------|-------------|------------|
+| PA documents | `*/primacy_attractors/*.yaml`, `*/pa_*.yaml` | Write requires active intent |
+| Agent registry | `agent_registry.json`, registry API endpoints | Mutation requires active intent |
+| Signing inputs | `*/signing_ceremony/*`, `*.sig` | Write requires active intent + Ed25519 verified |
+| Activation endpoints | Agent activation IPC/API calls | Requires active intent + signed PA |
+| Ed25519 key material | `*/keys/*.pem`, `*/keys/*.pub` | Write requires active intent (generation step) |
+
+**Enforcement logic:**
 
 ```python
-daemon.emit("commissioning_intent_declared", {
-    "intent_id": "uuid-here",
-    "step": "pa_authoring",
-    "target_agent": "scout-01",
-    "initiating_agent": "openclaw",
-    "ttl_seconds": 3600
-})
+def on_tool_call(action):
+    if matches_protected_resource(action.target_path):
+        active_intent = get_active_intent(actor_agent_id=action.actor)
+        if not active_intent:
+            emit("protected_resource_access_blocked", {
+                "resource_path": action.target_path,
+                "resource_type": classify_resource(action.target_path),
+                "requesting_agent_id": action.actor,
+                "active_intent_id": None,
+                "action": "quarantine"  # block + log, don't silently pass
+            })
+            return BLOCK
+        else:
+            emit("protected_resource_access_granted", {
+                "resource_path": action.target_path,
+                "resource_type": classify_resource(action.target_path),
+                "intent_id": active_intent.intent_id,
+                "authorization_basis": "active_commissioning_intent"
+            })
+            # Continue with commissioning-level scoring
 ```
 
-The daemon starts a TTL timer on `commissioning_intent_declared`. The timer is reset on each subsequent commissioning event that references the same `intent_id`. If the timer expires:
+### Deny-by-Default
 
-1. Daemon emits `commissioning_intent_expired` with the last completed step
-2. Any intermediate state (draft PA files, partial registry entries) is flagged as `ABANDONED`
-3. The agent registry entry (if created) transitions to `FAILED` with reason `"commissioning_timeout"`
-4. The abandoned commissioning becomes a governance event -- it gets scored and logged
+Access to governance-sensitive resources is **denied by default**. An agent must:
+1. Declare commissioning intent (creates the intent record)
+2. Have the intent validated by the daemon (TTL check, actor verification)
+3. Only then can it access protected resources
 
-### Terminal States
+An agent that writes a PA file without declaration gets blocked + `protected_resource_access_blocked` event. The file is not written. The attempt is logged. This is structural enforcement, not behavioral trust.
 
-Only two events are valid terminal states for a commissioning sequence:
-- `agent_commissioned` -- success, agent is now governed and active
-- `agent_decommissioned` -- explicit cancellation or revocation
+---
 
-Any commissioning sequence that reaches neither terminal state within the TTL is abandoned. There is no "partially commissioned" state -- an agent is either fully commissioned (PA signed, ceremony complete, active under governance) or it does not exist as a governed entity.
+## Authenticated Actor Identity (Codex Finding #2)
 
-### State Machine
+### The Problem with Caller-Supplied Identity
+
+v2 defined `delegation_source` as the caller-supplied `agent_id`. Any agent can claim to be any other agent. The daemon must derive identity from authenticated runtime state.
+
+### Resolution: Daemon-Resolved Identity
+
+`actor_agent_id` is **never caller-supplied**. The daemon resolves it from the authenticated session/capability binding:
 
 ```
-commissioning_intent_declared
-    |
-    v
-agent_pa_authored --> agent_pa_submitted --> agent_pa_signed --> agent_commissioned
-    |                     |                     |                     |
-    |   (timeout)         |   (timeout)         |   (timeout)         v
-    v                     v                     v                 [TERMINAL: active]
-commissioning_intent_expired (cleanup at whatever step was reached)
+1. Tool call arrives via IPC with session_id
+2. Daemon looks up session_id -> registered_agent_id mapping
+3. actor_agent_id = registered_agent_id (not what the caller claims)
+4. If session_id is not bound to a registered agent, actor_agent_id = "unregistered"
+   and commissioning actions are blocked
 ```
 
-## Delegation Source Semantics (Gap 2 Resolution)
-
-### delegation_source
-
-`delegation_source` is the **commissioning agent's agent_id** -- not the session key, not the principal's Ed25519 fingerprint.
-
-Rationale: the agent performing the commissioning action is the entity whose fidelity is being scored. The human principal's authority is verified separately via Ed25519 signature on the PA. Conflating the two would make delegation events ambiguous -- did the principal delegate, or did the agent?
-
-**Field definition:**
-```
-delegation_source: string  // agent_id of the delegating agent (e.g., "openclaw")
-```
-
-### delegation_chain
-
-`delegation_chain` is a JSON array of agent_ids tracing the full authority path from the original delegating agent to the current agent. The principal (human signer) is implicit -- they signed the root agent's PA.
-
-**Field definition:**
-```
-delegation_chain: string[]  // ordered list of agent_ids from root to current
-```
-
-**Examples:**
-- OC commissions researcher-01: `delegation_chain: ["openclaw"]`
-- researcher-01 delegates to scraper-01: `delegation_chain: ["openclaw", "researcher-01"]`
-- scraper-01 tries to delegate to helper-01: `delegation_chain: ["openclaw", "researcher-01", "scraper-01"]` -- depth 3, this triggers `authority_escalated`
-
-### Full Delegation Event Schema
+**Session-to-agent binding** is established during agent registration (Step 3 of onboarding). The daemon maintains a `session_bindings` table:
 
 ```json
 {
-  "event": "authority_delegated",
-  "sequence": 5200,
-  "timestamp": 1773800000,
-  "data": {
-    "delegation_source": "openclaw",
-    "receiving_agent_id": "researcher-01",
-    "delegation_chain": ["openclaw"],
-    "scope": ["web_research", "content_analysis"],
-    "pa_alignment_score": 0.72,
-    "intent_id": "uuid-of-commissioning-sequence",
-    "chain_depth": 1,
-    "max_chain_depth": 3
+  "session-uuid-1": {
+    "agent_id": "openclaw",
+    "pa_hash": "sha256:abc...",
+    "bound_at": 1773800000,
+    "binding_type": "commissioning_ceremony"
   }
 }
 ```
 
-### Escalation Event Schema
+### Immutable Delegation Chain References
+
+`delegation_chain` uses commissioning record IDs (the `event_id` of the `agent_commissioned` event), not agent names that can change:
 
 ```json
 {
-  "event": "authority_escalated",
-  "sequence": 5201,
-  "timestamp": 1773800001,
-  "data": {
-    "delegation_chain": ["openclaw", "researcher-01", "scraper-01"],
-    "attempted_receiving_agent": "helper-01",
-    "chain_depth": 3,
-    "max_chain_depth": 3,
-    "reason": "chain_depth_exceeded",
-    "requires": "human_ed25519_approval"
-  }
+  "delegation_chain": [
+    {"agent_id": "openclaw", "commissioning_record_id": "event-uuid-001", "pa_hash": "sha256:abc..."},
+    {"agent_id": "researcher-01", "commissioning_record_id": "event-uuid-042", "pa_hash": "sha256:def..."}
+  ]
 }
 ```
 
-## Commissioning Thresholds (Gap 3 Resolution)
+Each entry is a provenance reference -- the agent_id for readability, the commissioning_record_id and pa_hash for immutable verification.
 
-### Calibration-First Approach
+---
 
-T is right: no calibration data exists for commissioning actions. Setting thresholds at 0.70-0.80 when production mean is 0.614 would block most commissioning attempts. This violates TELOS's own principle -- detect and direct, don't gate on unvalidated thresholds.
+## Intent State Machine (Codex Finding #3)
 
-**Phase 1: Production thresholds with observe-mode calibration**
+### Complete State Machine
 
-| Action Category | Phase 1 Threshold | Notes |
-|----------------|-------------------|-------|
-| Routine tool call | EXECUTE >= 0.45, CLARIFY >= 0.35 | Current production values |
-| All commissioning events | EXECUTE >= 0.45, CLARIFY >= 0.35 | Same as production -- no special thresholds |
-| Mandatory enforce carve-out | YES | Commissioning events always enforce, even when routine ops are in observe |
-| Ed25519 gate | YES | Cryptographic verification regardless of fidelity score |
+```
+                     commissioning_intent_declared
+                                |
+                                v
+                      [INTENT_ACTIVE]
+                                |
+              +-----------------+------------------+
+              |                 |                  |
+              v                 v                  v
+      agent_pa_authored   commissioning_cancelled  (idle timeout)
+              |                 |                  |
+              v                 v                  v
+      [PA_AUTHORED]     [CANCELLED]          [EXPIRED]
+              |           (terminal)          (terminal)
+              v
+      agent_pa_submitted
+              |
+      +-------+--------+
+      |                 |
+      v                 v
+agent_pa_review_denied  agent_pa_signed
+      |                 |
+      v                 v
+[REVIEW_DENIED]   [PA_SIGNED]
+  (terminal)            |
+                        |
+                +-------+--------+
+                |                 |
+                v                 v
+        activation_failed   agent_commissioned
+                |                 |
+                v                 v
+        [ACTIVATION_FAILED]  [COMMISSIONED]
+          (terminal)          (terminal)
+                
+                              agent_decommissioned
+                                    |
+                                    v
+                              [DECOMMISSIONED]
+                                (terminal)
+```
 
-During Phase 1, every commissioning event is logged with full fidelity data. The Ed25519 signature and mandatory enforce mode are the real governance gates -- they don't depend on fidelity calibration.
+### Terminal States (6 total)
 
-**Phase 2: Empirically-derived thresholds**
+| Terminal State | Event | Cleanup Required |
+|---------------|-------|-----------------|
+| COMMISSIONED | `agent_commissioned` | None -- agent is active |
+| CANCELLED | `commissioning_cancelled` | Remove draft PA, registry entry -> FAILED |
+| EXPIRED | `commissioning_intent_expired` | Remove draft PA, registry entry -> FAILED |
+| REVIEW_DENIED | `agent_pa_review_denied` | Remove draft PA, registry entry -> FAILED |
+| ACTIVATION_FAILED | `activation_failed` | Signed PA preserved for retry, registry entry -> FAILED |
+| DECOMMISSIONED | `agent_decommissioned` | Agent removed from active governance |
 
-After N commissioning events (proposed: 20 minimum) have been scored in Phase 1:
+### Timeout Model
 
-1. Analyze the fidelity distribution of legitimate commissioning actions
-2. Set thresholds at the empirically-observed mean minus 1 standard deviation
-3. This ensures legitimate commissioning actions pass while anomalous ones trigger CLARIFY
+**Dual timeout** (not resettable TTL):
 
-T builds the threshold system as **configurable** from Phase 1. The values change; the mechanism doesn't.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_idle_seconds` | 3600 (1h) | Max time between any two events in the sequence. Resets on each event. |
+| `max_total_seconds` | 86400 (24h) | Absolute deadline from intent declaration. Never resets. |
 
-**Why this is correct:** The v1 proposal set aspirational thresholds based on the intuition that commissioning should require higher alignment. That intuition may be right -- but the specific numbers must come from data. The cryptographic gate (Ed25519) and mandatory enforce mode provide the structural security that fidelity thresholds cannot until they are calibrated.
+The idle timeout handles "walked away" scenarios. The total deadline prevents indefinite keepalive via periodic pings. Both are configurable per intent declaration.
 
-## Audit Trail Properties
+### Crash Recovery
 
-Commissioning events carry additional fields beyond `tool_call_scored`:
+Intent state is **persisted to disk** (not just in-memory). On daemon restart:
+1. Load all active intents from `~/.telos/commissioning/active_intents.json`
+2. Check TTLs against current time
+3. Expire any intents that exceeded deadlines during downtime
+4. Resume monitoring surviving intents
+
+---
+
+## Phase 1 Provenance Tracking (Codex Finding #4)
+
+Delegation chain enforcement is Phase 2. But provenance metadata is Phase 1 -- it costs nothing to record and closes the gaming window.
+
+**Every commissioning event in Phase 1 carries:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `commissioned_by_agent_id` | string | Daemon-resolved agent_id of the commissioning agent |
+| `parent_pa_hash` | string | PA hash of the commissioning agent (proves who they are) |
+| `intent_id` | UUID | Links to the commissioning sequence |
+
+This is metadata, not enforcement. Phase 1 records who created whom. Phase 2 enforces chain depth limits using this data.
+
+**Phase 1 `agent_commissioned` event:**
 
 ```json
 {
+  "event_id": "uuid-v4",
   "event": "agent_commissioned",
   "sequence": 5100,
   "timestamp": 1773800000,
+  "actor_agent_id": "openclaw",
+  "actor_session_id": "session-uuid",
+  "actor_authenticated": true,
+  "intent_id": "commissioning-uuid",
+  "previous_state": "pa_signed",
+  "new_state": "commissioned",
+  "reason_code": "normal_progression",
   "data": {
     "agent_id": "scout-01",
-    "delegation_source": "openclaw",
-    "delegation_chain": ["openclaw"],
-    "pa_hash": "sha256:abc123...",
+    "commissioned_by_agent_id": "openclaw",
+    "parent_pa_hash": "sha256:abc...",
+    "pa_hash": "sha256:def...",
     "pa_signature": "ed25519:...",
     "signer_public_key": "ed25519:jb_signing_key",
     "commissioning_ceremony_id": "tacp_v3_20260316",
-    "intent_id": "uuid-of-commissioning-sequence",
     "scope_boundaries": ["web_research", "content_drafting"],
-    "authority_depth": 1,
-    "max_chain_depth": 3,
     "fidelity_at_commissioning": 0.62,
     "governance_preset": "balanced",
     "threshold_source": "production_default"
@@ -228,60 +348,67 @@ Commissioning events carry additional fields beyond `tool_call_scored`:
 }
 ```
 
-## The Boundary Problem
+---
 
-How does the daemon distinguish "agent writes a file that happens to be a PA" from "agent is performing a governed commissioning action"?
+## Commissioning Thresholds
 
-**Proposal: Explicit action declaration.**
+### Calibration-First Approach
 
-The commissioning CLI (enterprise_onboarding.py) must emit a structured action declaration before each step:
+No calibration data exists for commissioning actions. Start at production thresholds, collect data, tune later.
 
-```python
-daemon.emit("commissioning_intent_declared", {
-    "intent_id": "uuid-here",
-    "step": "pa_authoring",
-    "target_agent": "scout-01",
-    "initiating_agent": "openclaw",
-    "ttl_seconds": 3600
-})
-```
+**Phase 1: Production thresholds**
 
-The daemon then knows that the next Write operation targeting a PA file is a commissioning action, not a routine file write. Without this declaration, a Write to a PA-shaped file is scored as a routine `tool_call_scored` -- the daemon does not infer intent from file content.
+| Action Category | Phase 1 Threshold | Notes |
+|----------------|-------------------|-------|
+| Routine tool call | EXECUTE >= 0.45, CLARIFY >= 0.35 | Current production values |
+| All commissioning events | EXECUTE >= 0.45, CLARIFY >= 0.35 | Same as production |
+| Mandatory enforce carve-out | YES | Commissioning events always enforce |
+| Ed25519 gate | YES | Cryptographic verification regardless of fidelity |
+| Resource protection | YES | Protected resources deny-by-default without active intent |
 
-This is explicit > implicit. The agent must declare that it is performing a commissioning action. The governance system then applies mandatory enforce mode and Ed25519 verification. An agent that writes a PA file without declaring commissioning intent gets routine scoring -- which means the PA exists as a file but has no governance standing.
+**Phase 2: Empirically-derived thresholds** after 20+ scored commissioning events.
+
+---
 
 ## Implementation Spec (for T)
 
 ### Phase 1 (~3-4 days)
 
-1. **6 new EventType enum values** in the daemon event schema (agent_pa_authored, agent_pa_submitted, agent_pa_signed, agent_commissioned, agent_decommissioned, agent_pa_amended)
-2. **2 intent lifecycle events** (commissioning_intent_declared, commissioning_intent_expired)
-3. **Intent declaration IPC handler** with TTL timer (default 3600s), reset on each commissioning step
-4. **Per-session gateMode override** for commissioning events (always enforce)
-5. **Ed25519 verification** at ceremony (verify signature on agent_commissioned)
-6. **Configurable commissioning thresholds** (starting at production levels, ready for Phase 2 tuning)
+1. **Common event envelope** -- event_id, actor_agent_id (daemon-resolved), actor_session_id, intent_id, previous_state, new_state, reason_code on all commissioning events
+2. **8 new EventType enum values** (6 commissioning + 2 intent lifecycle: commissioning_cancelled, commissioning_superseded)
+3. **Protected resource registry** -- path patterns for PA docs, registry, signing inputs, activation endpoints. Deny-by-default without active intent.
+4. **Intent state machine** with dual timeout (max_idle + max_total), 6 terminal states, persisted to disk for crash recovery
+5. **Session-to-agent binding table** -- daemon resolves actor_agent_id from authenticated session, never from caller
+6. **Provenance metadata** on every commissioning event (commissioned_by_agent_id, parent_pa_hash, intent_id)
+7. **Per-session gateMode override** for commissioning events (always enforce)
+8. **Ed25519 verification** at ceremony
+9. **Configurable thresholds** (starting at production levels)
 
-### Phase 2 (~2-3 days, after calibration data exists from real commissioning events)
+### Phase 2 (~2-3 days, after calibration data)
 
-7. **2 authority delegation events** (authority_delegated, authority_escalated)
-8. **Delegation registry** with chain depth tracking and `delegation_chain` field
-9. **delegation_source** field in all delegation events (agent_id of delegating agent)
-10. **Threshold override system** with calibration-backed values (after 20+ commissioning events scored)
+10. **2 authority delegation events** (authority_delegated, authority_escalated)
+11. **Delegation registry** with chain depth tracking, immutable references (commissioning_record_id + pa_hash)
+12. **Chain depth enforcement** (configurable, default 3)
+13. **Threshold override system** with calibration-backed values
 
-### Non-Blocking Notes (from T review)
+### Deferred (valid, not blocking)
 
-- **Multi-daemon coordination:** Phase 1 scoped to single-daemon. Multi-daemon extension point noted for future.
-- **PA schema validation:** Phase 1 uses existing validation (signature + hash). Extended schema validation deferred.
+- **Meta-governance:** Policy changes expanding commissioning power require ratification by distinct human authority. Process control, not code change.
+- **Chain depth as policy:** Make depth a per-PA or per-agent-class policy instead of global constant.
+- **commissioning_cancelled vs agent_decommissioned:** Already separated in v3 state machine.
+- **TTL tuning:** max_idle and max_total are configurable. Tune after real usage.
+
+---
 
 ## What This Means for the 6 Advisory Agents
 
 The 6 advisory agents (from the TACP v2 session) are NOT to be commissioned until:
 
 1. This protocol is reviewed and approved by JB
-2. T implements Phase 1 (new event types, intent lifecycle, enforce carve-out, Ed25519 verification)
-3. Each agent's PA is authored, submitted, reviewed, and Ed25519-signed
+2. T implements Phase 1 (resource protection, authenticated identity, intent state machine, provenance, enforce carve-out, Ed25519)
+3. Each agent's PA is authored, submitted, reviewed, and Ed25519-signed -- through the governed commissioning path, not file writes
 4. The commissioning ceremony runs under the new governed process
-5. Every step generates auditable commissioning events in the trail
+5. Every step generates auditable commissioning events with the common envelope
 6. Phase 1 commissioning telemetry feeds Phase 2 threshold calibration
 
-No shortcuts. The first agents commissioned under this protocol will be the proof that it works -- and the calibration data that makes the next commissioning better.
+No shortcuts. No bypasses. The first agents commissioned under this protocol prove that resource-level enforcement, authenticated identity, and crash-safe state management work in production.

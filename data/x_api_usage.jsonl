@@ -1,0 +1,3 @@
+{"timestamp": "2026-03-17T17:03:28.938839-04:00", "endpoint": "get_rules", "calls": 1}
+{"timestamp": "2026-03-17T17:03:30.229861-04:00", "endpoint": "delete_rules", "calls": 1}
+{"timestamp": "2026-03-17T17:03:31.781384-04:00", "endpoint": "add_rules", "calls": 1}
